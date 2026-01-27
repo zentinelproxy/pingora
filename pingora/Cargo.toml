@@ -34,7 +34,7 @@ pingora-cache = { version = "0.6.0", path = "../pingora-cache", optional = true,
 document-features = { version = "0.2.10", optional = true }
 
 [dev-dependencies]
-clap = { version = "3.2.25", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
 env_logger = "0.9"
 reqwest = { version = "0.11", features = ["rustls"], default-features = false }
@@ -42,7 +42,7 @@ hyper = "0.14"
 async-trait = { workspace = true }
 http = { workspace = true }
 log = { workspace = true }
-prometheus = "0.13"
+prometheus = "0.14"
 once_cell = { workspace = true }
 bytes = { workspace = true }
 regex = "1"
