@@ -32,6 +32,9 @@ pub struct TlsSettings {
     cert_path: String,
     key_path: String,
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
+    /// Pre-built ServerConfig (overrides cert_path/key_path when set).
+    /// Allows using a custom cert resolver for dynamic cert selection.
+    custom_server_config: Option<Arc<ServerConfig>>,
 }
 
 pub struct Acceptor {
@@ -48,6 +51,21 @@ impl TlsSettings {
     ///
     /// Todo: Return a result instead of panicking XD
     pub fn build(self) -> Acceptor {
+        // Use pre-built ServerConfig if provided (supports dynamic cert resolvers)
+        if let Some(config) = self.custom_server_config {
+            let config = if let Some(alpn_protocols) = self.alpn_protocols {
+                let mut cfg = (*config).clone();
+                cfg.alpn_protocols = alpn_protocols;
+                Arc::new(cfg)
+            } else {
+                config
+            };
+            return Acceptor {
+                acceptor: RusTlsAcceptor::from(config),
+                callbacks: None,
+            };
+        }
+
         let Ok(Some((certs, key))) = load_certs_and_key_files(&self.cert_path, &self.key_path)
         else {
             panic!(
@@ -104,7 +122,23 @@ impl TlsSettings {
             cert_path: cert_path.to_string(),
             key_path: key_path.to_string(),
             client_cert_verifier: None,
+            custom_server_config: None,
         })
+    }
+
+    /// Create TLS settings from a pre-built `ServerConfig`.
+    ///
+    /// This allows using a custom cert resolver (e.g. `ResolvesServerCert`)
+    /// for dynamic SNI-based certificate selection and hot-reload without
+    /// restarting the server.
+    pub fn from_server_config(config: Arc<ServerConfig>) -> Self {
+        TlsSettings {
+            alpn_protocols: None,
+            cert_path: String::new(),
+            key_path: String::new(),
+            client_cert_verifier: None,
+            custom_server_config: Some(config),
+        }
     }
 
     pub fn with_callbacks() -> Result<Self>
