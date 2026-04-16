@@ -1287,8 +1287,8 @@ pub mod range_filter {
         // and it must not match the body content.
         fn generate_boundary() -> String {
             use rand::Rng;
-            let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-            format!("{:016x}", rng.gen::<u64>())
+            let mut rng: rand::rngs::ThreadRng = rand::rng();
+            format!("{:016x}", rng.random::<u64>())
         }
         pub fn calculate_multipart_length(&self) -> usize {
             let mut total_length = 0;
