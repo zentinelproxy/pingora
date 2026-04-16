@@ -19,8 +19,8 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 use ahash::RandomState;
 use dashmap::DashMap;
 use pingora_limits::estimator::Estimator;
-use rand::distributions::Uniform;
-use rand::{thread_rng, Rng};
+use rand::distr::Uniform;
+use rand::{rng, Rng};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -82,7 +82,7 @@ fn run_bench<T: Counter>(
     distribution: &Uniform<u32>,
     test_name: &str,
 ) {
-    let mut rng = thread_rng();
+    let mut rng = rng();
     let before = Instant::now();
     for _ in 0..samples {
         let event: u32 = rng.sample(distribution);
