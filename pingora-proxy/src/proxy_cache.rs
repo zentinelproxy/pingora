@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::*;
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, TRANSFER_ENCODING};
 use http::{Method, StatusCode};
 use pingora_cache::key::CacheHashKey;
 use pingora_cache::lock::LockStatus;
@@ -661,45 +661,50 @@ where
                     }
                 }
             }
-            HttpTask::Body(data, end_stream) => match data {
-                Some(d) => {
-                    if session.cache.enabled() {
-                        // TODO: do this async
-                        // fail if writing the body would exceed the max_file_size_bytes
-                        let body_size_allowed =
-                            session.cache.track_body_bytes_for_max_file_size(d.len());
-                        if !body_size_allowed {
-                            debug!("chunked response exceeded max cache size, remembering that it is uncacheable");
-                            session
-                                .cache
-                                .response_became_uncacheable(NoCacheReason::ResponseTooLarge);
+            HttpTask::Body(data, end_stream) | HttpTask::UpgradedBody(data, end_stream) => {
+                // It is not normally advisable to cache upgraded responses
+                // e.g. they are essentially close-delimited, so they are easily truncated
+                // but the framework still allows for it
+                match data {
+                    Some(d) => {
+                        if session.cache.enabled() {
+                            // TODO: do this async
+                            // fail if writing the body would exceed the max_file_size_bytes
+                            let body_size_allowed =
+                                session.cache.track_body_bytes_for_max_file_size(d.len());
+                            if !body_size_allowed {
+                                debug!("chunked response exceeded max cache size, remembering that it is uncacheable");
+                                session
+                                    .cache
+                                    .response_became_uncacheable(NoCacheReason::ResponseTooLarge);
 
-                            return Error::e_explain(
-                                ERR_RESPONSE_TOO_LARGE,
-                                format!(
-                                    "writing data of size {} bytes would exceed max file size of {} bytes",
-                                    d.len(),
-                                    session.cache.max_file_size_bytes().expect("max file size bytes must be set to exceed size")
-                                ),
-                            );
+                                return Error::e_explain(
+                                    ERR_RESPONSE_TOO_LARGE,
+                                    format!(
+                                        "writing data of size {} bytes would exceed max file size of {} bytes",
+                                        d.len(),
+                                        session.cache.max_file_size_bytes().expect("max file size bytes must be set to exceed size")
+                                    ),
+                                );
+                            }
+
+                            // this will panic if more data is sent after we see end_stream
+                            // but should be impossible in real world
+                            let miss_handler = session.cache.miss_handler().unwrap();
+
+                            miss_handler.write_body(d.clone(), *end_stream).await?;
+                            if *end_stream {
+                                session.cache.finish_miss_handler().await?;
+                            }
                         }
-
-                        // this will panic if more data is sent after we see end_stream
-                        // but should be impossible in real world
-                        let miss_handler = session.cache.miss_handler().unwrap();
-
-                        miss_handler.write_body(d.clone(), *end_stream).await?;
-                        if *end_stream {
+                    }
+                    None => {
+                        if session.cache.enabled() && *end_stream {
                             session.cache.finish_miss_handler().await?;
                         }
                     }
                 }
-                None => {
-                    if session.cache.enabled() && *end_stream {
-                        session.cache.finish_miss_handler().await?;
-                    }
-                }
-            },
+            }
             HttpTask::Trailer(_) => {} // h1 trailer is not supported yet
             HttpTask::Done => {
                 if session.cache.enabled() {
@@ -1023,6 +1028,12 @@ pub mod range_filter {
             return RangeType::None;
         };
 
+        // "bytes=" with an empty (or whitespace-only) range-set is syntactically a
+        // range request with zero satisfiable range-specs, so return 416.
+        if ranges_str.trim().is_empty() {
+            return RangeType::Invalid;
+        }
+
         // Get the actual range string (e.g."100-200,300-400")
         let mut range_count = 0;
         for _ in ranges_str.split(',') {
@@ -1144,7 +1155,11 @@ pub mod range_filter {
             RangeType::new_single(0, 10)
         );
         assert_eq!(parse_range_header(b"bytes=-", 10, None), RangeType::Invalid);
-        assert_eq!(parse_range_header(b"bytes=", 10, None), RangeType::None);
+        assert_eq!(parse_range_header(b"bytes=", 10, None), RangeType::Invalid);
+        assert_eq!(
+            parse_range_header(b"bytes=  ", 10, None),
+            RangeType::Invalid
+        );
     }
 
     // Add some tests for multi-range too
@@ -1475,8 +1490,9 @@ pub mod range_filter {
                 resp.insert_header(&CONTENT_LENGTH, HeaderValue::from_static("0"))
                     .unwrap();
                 resp.remove_header(&ACCEPT_RANGES);
-                // TODO: remove other headers like content-encoding
                 resp.remove_header(&CONTENT_TYPE);
+                resp.remove_header(&CONTENT_ENCODING);
+                resp.remove_header(&TRANSFER_ENCODING);
                 resp.insert_header(&CONTENT_RANGE, format!("bytes */{content_length}"))
                     .unwrap()
             }
@@ -1556,6 +1572,8 @@ pub mod range_filter {
         req.insert_header("Range", "bytes=1-0").unwrap();
         let mut resp = gen_resp();
         resp.insert_header("Accept-Ranges", "bytes").unwrap();
+        resp.insert_header("Content-Encoding", "gzip").unwrap();
+        resp.insert_header("Transfer-Encoding", "chunked").unwrap();
         assert_eq!(
             RangeType::Invalid,
             range_header_filter(&req, &mut resp, None)
@@ -1567,6 +1585,8 @@ pub mod range_filter {
             b"bytes */10"
         );
         assert!(resp.headers.get("accept-ranges").is_none());
+        assert!(resp.headers.get("content-encoding").is_none());
+        assert!(resp.headers.get("transfer-encoding").is_none());
     }
 
     // Multipart Tests
@@ -1635,10 +1655,14 @@ pub mod range_filter {
         req.insert_header("Range", "bytes=1-0, 12-9, 50-40")
             .unwrap();
         let mut resp = gen_resp();
+        resp.insert_header("Content-Encoding", "br").unwrap();
+        resp.insert_header("Transfer-Encoding", "chunked").unwrap();
         let result = range_header_filter(&req, &mut resp, None);
         assert!(matches!(result, RangeType::Invalid));
         assert_eq!(resp.status.as_u16(), 416);
         assert!(resp.headers.get("accept-ranges").is_none());
+        assert!(resp.headers.get("content-encoding").is_none());
+        assert!(resp.headers.get("transfer-encoding").is_none());
     }
 
     #[test]
@@ -2277,7 +2301,16 @@ impl ServeFromCache {
         &mut self,
         cache: &mut HttpCache,
         range: &mut RangeBodyFilter,
+        upgraded: bool,
     ) -> Result<HttpTask> {
+        fn body_task(data: Bytes, upgraded: bool) -> HttpTask {
+            if upgraded {
+                HttpTask::UpgradedBody(Some(data), false)
+            } else {
+                HttpTask::Body(Some(data), false)
+            }
+        }
+
         if !cache.enabled() {
             // Cache is disabled due to internal error
             // TODO: if nothing is sent to eyeball yet, figure out a way to recovery by
@@ -2309,7 +2342,7 @@ impl ServeFromCache {
                 }
                 loop {
                     if let Some(b) = cache.hit_handler().read_body().await? {
-                        return Ok(HttpTask::Body(Some(b), false)); // false for now
+                        return Ok(body_task(b, upgraded));
                     }
                     // EOF from hit handler for body requested
                     // if multipart, then seek again
@@ -2328,7 +2361,7 @@ impl ServeFromCache {
                 // safety: caller of enable_miss() call it only if the async_body_reader exist
                 loop {
                     if let Some(b) = cache.miss_body_reader().unwrap().read_body().await? {
-                        return Ok(HttpTask::Body(Some(b), false)); // false for now
+                        return Ok(body_task(b, upgraded));
                     } else {
                         // EOF from hit handler for body requested
                         // if multipart, then seek again
