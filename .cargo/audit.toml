@@ -4,4 +4,44 @@ ignore = [
     # We don't use the protobuf encoder, only the text one.
     # https://rustsec.org/advisories/RUSTSEC-2024-0437
     "RUSTSEC-2024-0437",
+
+    # TODO: drop these ignores once main is rebased onto upstream pingora 0.8.0
+    # (tracked on the upgrade-0.8.0 branch). The 0.8.0 release fixes the three
+    # pingora-* advisories; the rustls-webpki / time advisories will be addressed
+    # by bumping transitive deps as part of that upgrade PR.
+
+    # pingora-cache: cache poisoning via insecure-by-default cache key.
+    # Fixed upstream by removing CacheKey::default impl (pingora >= 0.8.0).
+    # https://rustsec.org/advisories/RUSTSEC-2026-0035
+    "RUSTSEC-2026-0035",
+
+    # pingora-core: HTTP request smuggling via HTTP/1.0 + Transfer-Encoding misparsing.
+    # Fixed upstream in pingora >= 0.8.0 ("Reject non-chunked transfer-encoding").
+    # https://rustsec.org/advisories/RUSTSEC-2026-0034
+    "RUSTSEC-2026-0034",
+
+    # pingora-core: HTTP request smuggling via premature upgrade handling.
+    # Fixed upstream in pingora >= 0.8.0.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0033
+    "RUSTSEC-2026-0033",
+
+    # rustls-webpki: wildcard names accepted in name constraints.
+    # To be addressed by bumping rustls-webpki on the upgrade-0.8.0 branch.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0099
+    "RUSTSEC-2026-0099",
+
+    # rustls-webpki: URI name constraints incorrectly accepted.
+    # To be addressed by bumping rustls-webpki on the upgrade-0.8.0 branch.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0098
+    "RUSTSEC-2026-0098",
+
+    # rustls-webpki: reachable panic in CRL parsing.
+    # To be addressed by bumping rustls-webpki on the upgrade-0.8.0 branch.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0104
+    "RUSTSEC-2026-0104",
+
+    # time: DoS via stack exhaustion.
+    # To be addressed by bumping time on the upgrade-0.8.0 branch.
+    # https://rustsec.org/advisories/RUSTSEC-2026-0009
+    "RUSTSEC-2026-0009",
 ]
