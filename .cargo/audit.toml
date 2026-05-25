@@ -4,4 +4,22 @@ ignore = [
     # We don't use the protobuf encoder, only the text one.
     # https://rustsec.org/advisories/RUSTSEC-2024-0437
     "RUSTSEC-2024-0437",
+
+    # The following three are reachable only via test code: `reqwest = "0.11"`
+    # appears as a [dev-dependencies] entry in pingora-core, pingora-proxy, and
+    # pingora. reqwest 0.11 pins `rustls 0.21` which pins `rustls-webpki 0.101.x`;
+    # there are no patches in the 0.101.x line — all fixes are in >=0.103.12.
+    #
+    # The real fix is to bump reqwest 0.11 -> 0.12 in dev-deps, which in turn
+    # requires bumping hyper 0.14 -> 1.0 because the tests interleave hyper
+    # 0.14 (http 0.2) types with reqwest response types (now http 1.0).
+    # Tracked as a separate follow-up; until then these dev-only advisories are
+    # ignored. They cannot affect any consumer of pingora as a library.
+
+    # https://rustsec.org/advisories/RUSTSEC-2026-0098
+    "RUSTSEC-2026-0098",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0099
+    "RUSTSEC-2026-0099",
+    # https://rustsec.org/advisories/RUSTSEC-2026-0104
+    "RUSTSEC-2026-0104",
 ]
