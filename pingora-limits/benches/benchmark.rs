@@ -171,7 +171,7 @@ fn main() {
     const THREADS: usize = 8;
     const ITEMS: u32 = 1_000_000;
     const SAMPLES_PER_THREAD: usize = SAMPLES / THREADS;
-    let distribution = Uniform::new(0, ITEMS);
+    let distribution = Uniform::new(0, ITEMS).unwrap();
 
     // single thread
     {
