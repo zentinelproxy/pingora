@@ -2537,7 +2537,7 @@ dependencies = [
  "pingora-http",
  "pingora-lru",
  "pingora-timeout",
- "rand 0.8.7",
+ "rand 0.9.5",
  "regex",
  "rmp",
  "rmp-serde",
@@ -2590,7 +2590,7 @@ dependencies = [
  "pingora-s2n",
  "pingora-timeout",
  "prometheus 0.13.4",
- "rand 0.8.7",
+ "rand 0.9.5",
  "regex",
  "reqwest 0.11.27",
  "rstest",
@@ -2660,7 +2660,7 @@ dependencies = [
  "dashmap",
  "dhat",
  "float-cmp",
- "rand 0.8.7",
+ "rand 0.9.5",
 ]
 
 [[package]]
@@ -2679,7 +2679,7 @@ dependencies = [
  "pingora-http",
  "pingora-ketama",
  "pingora-runtime",
- "rand 0.8.7",
+ "rand 0.9.5",
  "tokio",
 ]
 
@@ -2691,7 +2691,7 @@ dependencies = [
  "hashbrown 0.12.3",
  "lru",
  "parking_lot",
- "rand 0.8.7",
+ "rand 0.9.5",
 ]
 
 [[package]]
@@ -2760,7 +2760,7 @@ dependencies = [
  "pingora-limits",
  "pingora-load-balancing",
  "prometheus 0.14.0",
- "rand 0.8.7",
+ "rand 0.9.5",
  "regex",
  "reqwest 0.11.27",
  "serde",
@@ -2776,7 +2776,7 @@ name = "pingora-runtime"
 version = "0.8.0"
 dependencies = [
  "once_cell",
- "rand 0.8.7",
+ "rand 0.9.5",
  "thread_local",
  "tokio",
 ]
