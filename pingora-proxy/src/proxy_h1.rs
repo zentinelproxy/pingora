@@ -696,6 +696,37 @@ where
                     header.insert_header(http::header::TRANSFER_ENCODING, "chunked")?;
                 }
 
+                // Ask the application whether this response should be
+                // discarded and the request retried. This happens before
+                // anything reaches downstream, which is the only point where
+                // discarding is still possible.
+                if !from_cache
+                    && !header.status.is_informational()
+                    && self.inner.should_retry_response(session, &header, ctx)
+                {
+                    if session.as_ref().retry_buffer_truncated() {
+                        // The request body was too large to buffer, so it
+                        // cannot be replayed. Forwarding the response is the
+                        // only correct option -- retrying would send a
+                        // truncated body upstream.
+                        warn!(
+                            "Not retrying {}: request body exceeded the retry buffer and \
+                             cannot be replayed",
+                            self.inner.request_summary(session, ctx)
+                        );
+                    } else {
+                        let mut e = Error::new(pingora_error::ErrorType::HTTPStatus(
+                            header.status.as_u16(),
+                        ));
+                        e.set_retry(true);
+                        e.set_context(format!(
+                            "upstream responded {}, retrying",
+                            header.status.as_u16()
+                        ));
+                        return Err(e);
+                    }
+                }
+
                 match self.inner.response_filter(session, &mut header, ctx).await {
                     Ok(_) => Ok(HttpTask::Header(header, end)),
                     Err(e) => Err(e),

@@ -618,6 +618,32 @@ where
                     }
                 }
 
+                // See the h1 path: the application may discard this response
+                // and have the request retried, but only before any of it has
+                // reached downstream.
+                if !from_cache
+                    && !header.status.is_informational()
+                    && self.inner.should_retry_response(session, &header, ctx)
+                {
+                    if session.as_ref().retry_buffer_truncated() {
+                        warn!(
+                            "Not retrying {}: request body exceeded the retry buffer and \
+                             cannot be replayed",
+                            self.inner.request_summary(session, ctx)
+                        );
+                    } else {
+                        let mut e = Error::new(pingora_error::ErrorType::HTTPStatus(
+                            header.status.as_u16(),
+                        ));
+                        e.set_retry(true);
+                        e.set_context(format!(
+                            "upstream responded {}, retrying",
+                            header.status.as_u16()
+                        ));
+                        return Err(e);
+                    }
+                }
+
                 self.inner
                     .response_filter(session, &mut header, ctx)
                     .await?;

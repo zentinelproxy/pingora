@@ -294,6 +294,43 @@ pub trait ProxyHttp {
 
     /// Modify the response header from the upstream
     ///
+    /// Decide whether to discard an upstream response and retry the request.
+    ///
+    /// Called with the upstream response header *before* any of the response
+    /// reaches downstream, so returning `true` discards it and re-runs the
+    /// request against a freshly selected peer. This is what makes a
+    /// "retry on 502/503" policy expressible: the built-in retry loop only
+    /// re-runs on transport errors, and by the time a status code is known
+    /// there is no error to react to.
+    ///
+    /// Returning `true` is only honoured when a retry is actually possible:
+    ///
+    /// * retries must remain (see the `max_retries` server setting), and
+    /// * the request body must have been buffered in full for replay. A body
+    ///   too large to buffer cannot be re-sent, so the response is forwarded
+    ///   downstream unchanged and a warning is logged.
+    ///
+    /// **The implementation is responsible for bounding retries itself.** This
+    /// is called on every attempt, so an implementation that always returns
+    /// `true` will retry until the server-wide limit is reached and then
+    /// surface a proxy error rather than the upstream response. Returning
+    /// `false` on the final attempt is what lets the last response through,
+    /// which is almost always what an operator wants — three failed tries
+    /// should end with the upstream's 503, not a generic gateway error.
+    ///
+    /// Responses served from cache never trigger this.
+    fn should_retry_response(
+        &self,
+        _session: &Session,
+        _resp: &ResponseHeader,
+        _ctx: &mut Self::CTX,
+    ) -> bool
+    where
+        Self::CTX: Send + Sync,
+    {
+        false
+    }
+
     /// The modification is before caching, so any change here will be stored in the cache if enabled.
     ///
     /// Responses served from cache won't trigger this filter. If the cache needed revalidation,
