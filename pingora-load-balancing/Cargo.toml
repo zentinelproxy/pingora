@@ -1,14 +1,16 @@
 [package]
-name = "pingora-load-balancing"
+name = "zentinel-pingora-load-balancing"
 version = "0.8.1"
 authors = ["Yuchen Wu <yuchen@cloudflare.com>"]
 license = "Apache-2.0"
 edition = "2021"
-repository = "https://github.com/cloudflare/pingora"
+repository = "https://github.com/zentinelproxy/pingora"
 categories = ["network-programming"]
 keywords = ["proxy", "pingora"]
 description = """
 Common load balancing features for Pingora proxy.
+
+Zentinel's fork of pingora-load-balancing, republished under a distinct name so that zentinel-proxy can be installed from crates.io. Not affiliated with or endorsed by Cloudflare.
 """
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -18,11 +20,11 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
-pingora-http = { version = "0.8.1", path = "../pingora-http" }
-pingora-error = { version = "0.8.1", path = "../pingora-error" }
-pingora-core = { version = "0.8.1", path = "../pingora-core", default-features = false }
-pingora-ketama = { version = "0.8.1", path = "../pingora-ketama" }
-pingora-runtime = { version = "0.8.1", path = "../pingora-runtime" }
+pingora-http = { version = "0.8.1" }
+pingora-error = { version = "0.8.1" }
+pingora-core = { package = "zentinel-pingora-core", version = "0.8.1", path = "../pingora-core", default-features = false }
+pingora-ketama = { version = "0.8.1" }
+pingora-runtime = { version = "0.8.1" }
 arc-swap = "1"
 fnv = "1"
 rand = "0.8"

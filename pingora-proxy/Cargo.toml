@@ -1,16 +1,18 @@
 [package]
-name = "pingora-proxy"
+name = "zentinel-pingora-proxy"
 version = "0.8.1"
 authors = ["Yuchen Wu <yuchen@cloudflare.com>"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.84"
-repository = "https://github.com/cloudflare/pingora"
+repository = "https://github.com/zentinelproxy/pingora"
 categories = ["asynchronous", "network-programming"]
 keywords = ["async", "http", "proxy", "pingora"]
 exclude = ["tests/*"]
 description = """
 Pingora HTTP proxy APIs and traits.
+
+Zentinel's fork of pingora-proxy, republished under a distinct name so that zentinel-proxy can be installed from crates.io. Not affiliated with or endorsed by Cloudflare.
 """
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -19,11 +21,11 @@ name = "pingora_proxy"
 path = "src/lib.rs"
 
 [dependencies]
-pingora-error = { version = "0.8.1", path = "../pingora-error" }
-pingora-core = { version = "0.8.1", path = "../pingora-core", default-features = false }
-pingora-cache = { version = "0.8.1", path = "../pingora-cache", default-features = false }
+pingora-error = { version = "0.8.1" }
+pingora-core = { package = "zentinel-pingora-core", version = "0.8.1", path = "../pingora-core", default-features = false }
+pingora-cache = { package = "zentinel-pingora-cache", version = "0.8.1", path = "../pingora-cache", default-features = false }
 tokio = { workspace = true, features = ["macros", "net"] }
-pingora-http = { version = "0.8.1", path = "../pingora-http" }
+pingora-http = { version = "0.8.1" }
 http = { workspace = true }
 futures = "0.3"
 bytes = { workspace = true }
@@ -48,8 +50,8 @@ hyper = { version = "1", features = ["client", "http1", "http2"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "http2"] }
 http-body-util = "0.1"
 tokio-tungstenite = "0.26"
-pingora-limits = { version = "0.8.1", path = "../pingora-limits" }
-pingora-load-balancing = { version = "0.8.1", path = "../pingora-load-balancing", default-features=false }
+pingora-limits = { version = "0.8.1" }
+pingora-load-balancing = { package = "zentinel-pingora-load-balancing", version = "0.8.1", path = "../pingora-load-balancing", default-features=false }
 prometheus = "0"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
