@@ -1,0 +1,45 @@
+Zentinel fork of Pingora
+========================
+
+This repository is a fork of Pingora (https://github.com/cloudflare/pingora),
+Copyright 2024 Cloudflare, Inc., licensed under the Apache License, Version 2.0.
+
+Zentinel is not affiliated with, sponsored by, or endorsed by Cloudflare, Inc.
+
+Modifications
+-------------
+
+As required by section 4(b) of the Apache License, the following files carry
+modifications relative to upstream Pingora 0.8.1:
+
+  pingora-core/src/listeners/tls/rustls/mod.rs
+      Adds `TlsSettings::with_server_config`, which accepts a caller-built
+      `rustls::ServerConfig`. Upstream `TlsSettings::build()` constructs its own
+      configuration and finishes with `with_single_cert`, so a caller cannot
+      supply a per-SNI certificate resolver, a client-certificate verifier, or
+      an explicit protocol-version and cipher-suite selection.
+
+  pingora-proxy/src/proxy_trait.rs
+  pingora-proxy/src/proxy_h1.rs
+  pingora-proxy/src/proxy_h2.rs
+      Adds a `should_retry_response` hook, letting the application decide from
+      the upstream's response headers whether a request should be retried.
+      Upstream only retries on connection-level failures.
+
+No other source file differs from upstream 0.8.1.
+
+Republished crates
+------------------
+
+Five crates are published to crates.io under `zentinel-`-prefixed names, because
+`cargo publish` strips git sources and a published crate cannot depend on a fork
+by URL:
+
+  zentinel-pingora-core             (modified)
+  zentinel-pingora-proxy            (modified)
+  zentinel-pingora-cache            (unmodified; depends on the fork's core)
+  zentinel-pingora-load-balancing   (unmodified; depends on the fork's core)
+  zentinel-pingora                  (unmodified; umbrella over the above)
+
+The remaining crates in this repository are unmodified and are not republished;
+consumers resolve them from upstream crates.io.

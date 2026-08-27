@@ -1,15 +1,17 @@
 [package]
-name = "pingora-cache"
+name = "zentinel-pingora-cache"
 version = "0.8.1"
 authors = ["Yuchen Wu <yuchen@cloudflare.com>"]
 license = "Apache-2.0"
 edition = "2021"
 rust-version = "1.84"
-repository = "https://github.com/cloudflare/pingora"
+repository = "https://github.com/zentinelproxy/pingora"
 categories = ["asynchronous", "network-programming"]
 keywords = ["async", "http", "cache"]
 description = """
 HTTP caching APIs for Pingora proxy.
+
+Zentinel's fork of pingora-cache, republished under a distinct name so that zentinel-proxy can be installed from crates.io. Not affiliated with or endorsed by Cloudflare.
 """
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -18,12 +20,12 @@ name = "pingora_cache"
 path = "src/lib.rs"
 
 [dependencies]
-pingora-core = { version = "0.8.1", path = "../pingora-core", default-features = false }
-pingora-error = { version = "0.8.1", path = "../pingora-error" }
-pingora-header-serde = { version = "0.8.1", path = "../pingora-header-serde" }
-pingora-http = { version = "0.8.1", path = "../pingora-http" }
-pingora-lru = { version = "0.8.1", path = "../pingora-lru" }
-pingora-timeout = { version = "0.8.1", path = "../pingora-timeout" }
+pingora-core = { package = "zentinel-pingora-core", version = "0.8.1", path = "../pingora-core", default-features = false }
+pingora-error = { version = "0.8.1" }
+pingora-header-serde = { version = "0.8.1" }
+pingora-http = { version = "0.8.1" }
+pingora-lru = { version = "0.8.1" }
+pingora-timeout = { version = "0.8.1" }
 bstr = { workspace = true }
 http = { workspace = true }
 indexmap = "1"
