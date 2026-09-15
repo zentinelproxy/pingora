@@ -1,25 +1,16 @@
+# Advisories against rustls-webpki 0.101.7, pulled in transitively by
+# aws-sdk-s3-transfer-manager through the legacy rustls 0.21 chain used by
+# dial9's worker-s3 feature. No patch exists in 0.101.x; not reachable in
+# our usage because this is TLS client use only and does not parse CRLs.
+# Remove once Pingora migrates to the Dial9 release line that removed
+# aws-sdk-s3-transfer-manager.
+
 [advisories]
 ignore = [
-    # This came from the prometheus crate's protobuf encoder.
-    # We don't use the protobuf encoder, only the text one.
-    # https://rustsec.org/advisories/RUSTSEC-2024-0437
-    "RUSTSEC-2024-0437",
-
-    # The following three are reachable only via test code: `reqwest = "0.11"`
-    # appears as a [dev-dependencies] entry in pingora-core, pingora-proxy, and
-    # pingora. reqwest 0.11 pins `rustls 0.21` which pins `rustls-webpki 0.101.x`;
-    # there are no patches in the 0.101.x line — all fixes are in >=0.103.12.
-    #
-    # The real fix is to bump reqwest 0.11 -> 0.12 in dev-deps, which in turn
-    # requires bumping hyper 0.14 -> 1.0 because the tests interleave hyper
-    # 0.14 (http 0.2) types with reqwest response types (now http 1.0).
-    # Tracked as a separate follow-up; until then these dev-only advisories are
-    # ignored. They cannot affect any consumer of pingora as a library.
-
-    # https://rustsec.org/advisories/RUSTSEC-2026-0098
-    "RUSTSEC-2026-0098",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0099
-    "RUSTSEC-2026-0099",
-    # https://rustsec.org/advisories/RUSTSEC-2026-0104
-    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0098", # rustls-webpki: URI name constraints incorrectly accepted
+    "RUSTSEC-2026-0099", # rustls-webpki: name constraints accepted for wildcard certs
+    "RUSTSEC-2026-0104", # rustls-webpki: reachable panic in CRL parsing
+    # h2 0.3.27 is pulled in only by the optional worker-s3 dependency chain.
+    # The feature is disabled by default, but users who enable it remain affected.
+    "RUSTSEC-2026-0258", # h2: unbounded empty DATA frames
 ]
