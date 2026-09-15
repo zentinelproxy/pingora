@@ -14,13 +14,16 @@
 
 use std::sync::Arc;
 
-use crate::listeners::TlsAcceptCallbacks;
+use crate::listeners::{SharedTlsAcceptCallbacks, TlsAcceptCallbacks};
+use crate::offload::OffloadRuntime;
 use crate::protocols::tls::{server::handshake, server::handshake_with_callback, TlsStream};
+use crate::server::configuration::ServerConf;
 use log::{debug, warn};
-use pingora_error::ErrorType::InternalError;
+use pingora_error::ErrorType::{InternalError, InvalidCert};
 use pingora_error::{Error, OrErr, Result};
 use pingora_rustls::load_certs_and_key_files;
 use pingora_rustls::ClientCertVerifier;
+use pingora_rustls::ResolvesServerCert;
 use pingora_rustls::ServerConfig;
 use pingora_rustls::{version, TlsAcceptor as RusTlsAcceptor};
 
@@ -31,13 +34,17 @@ pub struct TlsSettings {
     alpn_protocols: Option<Vec<Vec<u8>>>,
     cert_path: String,
     key_path: String,
+    cert_resolver: Option<Arc<dyn ResolvesServerCert>>,
     client_cert_verifier: Option<Arc<dyn ClientCertVerifier>>,
     server_config: Option<ServerConfig>,
+    callbacks: Option<TlsAcceptCallbacks>,
+    offload_threadpool: Option<(usize, usize)>,
 }
 
 pub struct Acceptor {
     pub acceptor: RusTlsAcceptor,
-    callbacks: Option<TlsAcceptCallbacks>,
+    callbacks: Option<SharedTlsAcceptCallbacks>,
+    offload: Option<OffloadRuntime>,
 }
 
 impl TlsSettings {
@@ -65,18 +72,17 @@ impl TlsSettings {
                          that ServerConfig specifies."
                     );
                 }
+                if self.cert_resolver.is_some() {
+                    warn!(
+                        "TlsSettings: ignoring the certificate resolver set via \
+                         set_cert_resolver(), because this endpoint was built from a \
+                         caller-supplied ServerConfig. Certificates are whatever that \
+                         ServerConfig resolves."
+                    );
+                }
                 config
             }
             None => {
-                let Ok(Some((certs, key))) =
-                    load_certs_and_key_files(&self.cert_path, &self.key_path)
-                else {
-                    panic!(
-                        "Failed to load provided certificates \"{}\" or key \"{}\".",
-                        self.cert_path, self.key_path
-                    )
-                };
-
                 let builder = ServerConfig::builder_with_protocol_versions(&[
                     &version::TLS12,
                     &version::TLS13,
@@ -86,12 +92,32 @@ impl TlsSettings {
                 } else {
                     builder.with_no_client_auth()
                 };
-                builder
-                    .with_single_cert(certs, key)
-                    .explain_err(InternalError, |e| {
-                        format!("Failed to create server listener config: {e}")
-                    })
-                    .unwrap()
+
+                if let Some(resolver) = self.cert_resolver {
+                    builder.with_cert_resolver(resolver)
+                } else {
+                    assert!(
+                        !self.cert_path.is_empty() && !self.key_path.is_empty(),
+                        "Either set_cert_resolver() or both set_certificate_chain_file() and \
+                         set_private_key_file() must be called before build()."
+                    );
+
+                    let Ok(Some((certs, key))) =
+                        load_certs_and_key_files(&self.cert_path, &self.key_path)
+                    else {
+                        panic!(
+                            "Failed to load provided certificates \"{}\" or key \"{}\".",
+                            self.cert_path, self.key_path
+                        )
+                    };
+
+                    builder
+                        .with_single_cert(certs, key)
+                        .explain_err(InternalError, |e| {
+                            format!("Failed to create server listener config: {e}")
+                        })
+                        .unwrap()
+                }
             }
         };
 
@@ -101,7 +127,10 @@ impl TlsSettings {
 
         Acceptor {
             acceptor: RusTlsAcceptor::from(Arc::new(config)),
-            callbacks: None,
+            callbacks: self.callbacks.map(SharedTlsAcceptCallbacks::from),
+            offload: self.offload_threadpool.map(|(shards, threads_per_shard)| {
+                OffloadRuntime::new("downstream TLS offload", shards, threads_per_shard)
+            }),
         }
     }
 
@@ -120,6 +149,75 @@ impl TlsSettings {
         self.client_cert_verifier = Some(verifier);
     }
 
+    /// Install a user-provided server certificate resolver.
+    ///
+    /// When set, any certificate/key paths are ignored at `build()`. Useful for
+    /// dynamic SNI-based selection, where the cert cannot be chosen ahead of the
+    /// handshake.
+    pub fn set_cert_resolver(&mut self, resolver: Arc<dyn ResolvesServerCert>) {
+        self.cert_resolver = Some(resolver);
+    }
+
+    /// Set the path to the certificate chain file (PEM format).
+    ///
+    /// Returns an error if the file cannot be opened or contains no X.509
+    /// certificate, matching the OpenSSL backend's behavior.
+    pub fn set_certificate_chain_file(&mut self, path: &str) -> Result<()> {
+        let path_str = path.to_string();
+        let bytes = pingora_rustls::load_pem_file_ca(&path_str)?;
+        if bytes.is_empty() {
+            return Error::e_explain(InvalidCert, format!("No X.509 certificate found in {path}"));
+        }
+        self.cert_path = path_str;
+        Ok(())
+    }
+
+    /// Set the path to the private key file (PEM format).
+    ///
+    /// Returns an error if the file cannot be opened or contains no private
+    /// key, matching the OpenSSL backend's behavior.
+    pub fn set_private_key_file(&mut self, path: &str) -> Result<()> {
+        let path_str = path.to_string();
+        let bytes = pingora_rustls::load_pem_file_private_key(&path_str)?;
+        if bytes.is_empty() {
+            return Error::e_explain(InvalidCert, format!("No private key found in {path}"));
+        }
+        self.key_path = path_str;
+        Ok(())
+    }
+
+    /// Offload server-side TLS handshakes for this endpoint to dedicated
+    /// single-threaded runtime pools.
+    ///
+    /// `shards` partitions accepted connections by connection id, and
+    /// `threads_per_shard` controls how many single-threaded runtimes are
+    /// available per shard. Both values must be greater than zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics when either `shards` or `threads_per_shard` is zero.
+    #[track_caller]
+    pub fn set_offload_threadpool(&mut self, shards: usize, threads_per_shard: usize) {
+        assert!(shards != 0, "shards must be greater than zero");
+        assert!(
+            threads_per_shard != 0,
+            "threads_per_shard must be greater than zero"
+        );
+        self.offload_threadpool = Some((shards, threads_per_shard));
+    }
+
+    /// Offload server-side TLS handshakes using the downstream TLS offload
+    /// settings in [`ServerConf`], when both values are set and non-zero.
+    ///
+    /// This helper lets callers wire configuration files into per-listener
+    /// [`TlsSettings`]. If either configuration value is unset or zero,
+    /// this method leaves handshake offload disabled.
+    pub fn set_offload_threadpool_from_server_conf(&mut self, server_conf: &ServerConf) {
+        if let Some((shards, threads_per_shard)) = server_conf.downstream_tls_offload_threadpool() {
+            self.set_offload_threadpool(shards, threads_per_shard);
+        }
+    }
+
     pub fn intermediate(cert_path: &str, key_path: &str) -> Result<Self>
     where
         Self: Sized,
@@ -128,8 +226,32 @@ impl TlsSettings {
             alpn_protocols: None,
             cert_path: cert_path.to_string(),
             key_path: key_path.to_string(),
+            cert_resolver: None,
             client_cert_verifier: None,
             server_config: None,
+            callbacks: None,
+            offload_threadpool: None,
+        })
+    }
+
+    /// Create a new [`TlsSettings`] with post-handshake callbacks.
+    ///
+    /// Before calling `build()`, supply either a cert/key pair via
+    /// `set_certificate_chain_file` + `set_private_key_file`, or a custom
+    /// resolver via `set_cert_resolver`.
+    pub fn with_callbacks(callbacks: TlsAcceptCallbacks) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(TlsSettings {
+            alpn_protocols: None,
+            cert_path: String::new(),
+            key_path: String::new(),
+            cert_resolver: None,
+            client_cert_verifier: None,
+            server_config: None,
+            callbacks: Some(callbacks),
+            offload_threadpool: None,
         })
     }
 
@@ -137,9 +259,10 @@ impl TlsSettings {
     ///
     /// [`TlsSettings::intermediate`] loads a single certificate and applies a
     /// fixed profile: TLS 1.2 and 1.3, the provider's default cipher suites,
-    /// and no client authentication. That is the right default, but it leaves
-    /// no way to express anything rustls supports beyond it. This constructor
-    /// takes the `ServerConfig` as given, so the caller can supply:
+    /// and no client authentication. [`set_cert_resolver`](Self::set_cert_resolver)
+    /// and [`set_client_cert_verifier`](Self::set_client_cert_verifier) widen
+    /// that, but the protocol versions and cipher suites stay fixed. This
+    /// constructor takes the `ServerConfig` as given, so the caller can supply:
     ///
     /// * a [`ResolvesServerCert`] implementation, to pick a certificate per
     ///   SNI hostname rather than serving one certificate to every client
@@ -147,17 +270,17 @@ impl TlsSettings {
     /// * a client certificate verifier, for mTLS
     /// * session storage and ticketing policy
     ///
-    /// Only [`enable_h2`](Self::enable_h2) and [`set_alpn`](Self::set_alpn)
-    /// still apply on top; they overwrite `alpn_protocols` on the supplied
-    /// config. Every other setter is ignored on this path, since the config is
-    /// already complete — [`build`](Self::build) logs a warning if a client
-    /// certificate verifier was set that it has to discard.
+    /// Settings that configure the acceptor rather than the `ServerConfig`
+    /// still apply on top: [`enable_h2`](Self::enable_h2) and
+    /// [`set_alpn`](Self::set_alpn) overwrite `alpn_protocols` on the supplied
+    /// config, and [`set_offload_threadpool`](Self::set_offload_threadpool)
+    /// works as usual. `set_cert_resolver` and `set_client_cert_verifier` are
+    /// ignored on this path, since the config is already complete —
+    /// [`build`](Self::build) logs a warning for each one it has to discard.
     ///
     /// Unlike `intermediate`, this cannot panic on certificate loading: the
     /// caller has already loaded and validated the certificates, and so gets
     /// to report failures in its own terms rather than aborting the process.
-    ///
-    /// [`ResolvesServerCert`]: https://docs.rs/rustls/latest/rustls/server/trait.ResolvesServerCert.html
     pub fn with_server_config(config: ServerConfig) -> Result<Self>
     where
         Self: Sized,
@@ -166,29 +289,54 @@ impl TlsSettings {
             alpn_protocols: None,
             cert_path: String::new(),
             key_path: String::new(),
+            cert_resolver: None,
             client_cert_verifier: None,
             server_config: Some(config),
+            callbacks: None,
+            offload_threadpool: None,
         })
-    }
-
-    pub fn with_callbacks() -> Result<Self>
-    where
-        Self: Sized,
-    {
-        // TODO: verify if/how callback in handshake can be done using Rustls
-        Error::e_explain(
-            InternalError,
-            "Certificate callbacks are not supported with feature \"rustls\".",
-        )
     }
 }
 
 impl Acceptor {
-    pub async fn tls_handshake<S: IO>(&self, stream: S) -> Result<TlsStream<S>> {
+    /// Build an `Acceptor` from a runtime-constructed rustls [`ServerConfig`],
+    /// rather than from certificate/key files.
+    ///
+    /// This supports configurations whose key material does not live in files
+    /// on disk, e.g. certificates fetched from a secrets manager. The
+    /// resulting `Acceptor` accepts TLS connections via
+    /// [`Self::tls_handshake`] exactly as one built by [`TlsSettings::build`]
+    /// with no handshake offload configured.
+    pub fn from_server_config(config: Arc<ServerConfig>) -> Self {
+        Self {
+            acceptor: RusTlsAcceptor::from(config),
+            callbacks: None,
+            offload: None,
+        }
+    }
+
+    pub async fn tls_handshake<S: IO + 'static>(&self, stream: S) -> Result<TlsStream<S>> {
         debug!("new tls session");
-        // TODO: be able to offload this handshake in a thread pool
-        if let Some(cb) = self.callbacks.as_ref() {
-            handshake_with_callback(self, stream, cb).await
+        if let Some(offload) = self.offload.as_ref() {
+            // Clone without offload to prevent recursive offloading on the worker runtime.
+            let acceptor = Acceptor {
+                acceptor: self.acceptor.clone(),
+                callbacks: None,
+                offload: None,
+            };
+            let callbacks = self.callbacks.clone();
+            let rt = offload.get_runtime(stream.id() as u64);
+            rt.spawn(async move {
+                if let Some(cb) = callbacks.as_ref() {
+                    handshake_with_callback(&acceptor, stream, cb.as_ref()).await
+                } else {
+                    handshake(&acceptor, stream).await
+                }
+            })
+            .await
+            .or_err(InternalError, "TLS offload runtime failure")?
+        } else if let Some(cb) = self.callbacks.as_ref() {
+            handshake_with_callback(self, stream, cb.as_ref()).await
         } else {
             handshake(self, stream).await
         }
@@ -198,9 +346,11 @@ impl Acceptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pingora_rustls::version;
-    use rustls::server::{ClientHello, ResolvesServerCert};
+    use crate::protocols::l4::stream::Stream as L4Stream;
+    use pingora_rustls::load_certs_and_key_files;
+    use rustls::server::ClientHello;
     use rustls::sign::CertifiedKey;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     /// A resolver is the reason `with_server_config` exists: it is how a
     /// caller serves a different certificate per SNI hostname. Returning
@@ -245,8 +395,9 @@ mod tests {
             .build();
     }
 
-    /// ALPN is the one setting that still layers on top of a supplied config,
-    /// because `enable_h2` is how callers opt into HTTP/2 on any endpoint.
+    /// ALPN is the one config field that still layers on top of a supplied
+    /// config, because `enable_h2` is how callers opt into HTTP/2 on any
+    /// endpoint.
     #[test]
     fn enable_h2_applies_on_top_of_a_prebuilt_config() {
         let mut settings = TlsSettings::with_server_config(config_with_resolver()).unwrap();
@@ -266,14 +417,61 @@ mod tests {
         let _acceptor = settings.build();
     }
 
-    /// A supplied config decides its own client authentication policy, so a
-    /// verifier set through the setter has nowhere to go. `build()` warns
-    /// rather than silently implying mTLS is active.
+    /// A supplied config decides its own client authentication policy and
+    /// certificate resolution, so a verifier or resolver set through the
+    /// setters has nowhere to go. `build()` warns rather than silently
+    /// implying they are active.
     #[test]
-    fn prebuilt_config_keeps_its_own_client_auth_policy() {
+    fn prebuilt_config_keeps_its_own_client_auth_and_resolver() {
         let mut settings = TlsSettings::with_server_config(config_with_resolver()).unwrap();
         settings.set_client_cert_verifier(rustls::server::WebPkiClientVerifier::no_client_auth());
+        settings.set_cert_resolver(Arc::new(NoCerts));
 
         let _acceptor = settings.build();
+    }
+
+    #[tokio::test]
+    async fn test_from_server_config_handshake() {
+        // Build a rustls ServerConfig by hand, as a server whose key material
+        // arrives in memory (e.g. from a secrets manager) would. The fixture
+        // files stand in for that material here.
+        pingora_rustls::install_default_crypto_provider();
+        let cert_path = format!("{}/tests/keys/server.crt", env!("CARGO_MANIFEST_DIR"));
+        let key_path = format!("{}/tests/keys/key.pem", env!("CARGO_MANIFEST_DIR"));
+        let (certs, key) = load_certs_and_key_files(&cert_path, &key_path)
+            .unwrap()
+            .unwrap();
+        let config =
+            ServerConfig::builder_with_protocol_versions(&[&version::TLS12, &version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .unwrap();
+        let acceptor = Acceptor::from_server_config(Arc::new(config));
+
+        // Accept a plain TCP connection and drive the TLS handshake directly
+        // through the Acceptor, with no TlsSettings (and no cert/key files)
+        // involved.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (tcp_stream, _) = listener.accept().await.unwrap();
+            let stream: L4Stream = tcp_stream.into();
+            let mut tls_stream = acceptor.tls_handshake(stream).await.unwrap();
+            let mut buf = [0; 1024];
+            let _ = tls_stream.read(&mut buf).await.unwrap();
+            tls_stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na")
+                .await
+                .unwrap();
+            tls_stream.flush().await.unwrap();
+        });
+
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let res = client.get(format!("https://{addr}")).send().await.unwrap();
+        assert_eq!(res.status(), reqwest::StatusCode::OK);
     }
 }

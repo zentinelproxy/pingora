@@ -10,14 +10,16 @@ Modifications
 -------------
 
 As required by section 4(b) of the Apache License, the following files carry
-modifications relative to upstream Pingora 0.8.1:
+modifications relative to upstream Pingora 0.9.0:
 
   pingora-core/src/listeners/tls/rustls/mod.rs
       Adds `TlsSettings::with_server_config`, which accepts a caller-built
       `rustls::ServerConfig`. Upstream `TlsSettings::build()` constructs its own
-      configuration and finishes with `with_single_cert`, so a caller cannot
-      supply a per-SNI certificate resolver, a client-certificate verifier, or
-      an explicit protocol-version and cipher-suite selection.
+      configuration with a fixed protocol-version and cipher-suite profile, so
+      a caller cannot narrow either, nor control session storage or ticketing.
+      (Upstream 0.9.0 added `set_cert_resolver`, `set_client_cert_verifier`
+      and `Acceptor::from_server_config`; none of them yields a `TlsSettings`
+      built from a complete `ServerConfig`, which is what a listener takes.)
 
   pingora-proxy/src/proxy_trait.rs
   pingora-proxy/src/proxy_h1.rs
@@ -26,7 +28,12 @@ modifications relative to upstream Pingora 0.8.1:
       the upstream's response headers whether a request should be retried.
       Upstream only retries on connection-level failures.
 
-No other source file differs from upstream 0.8.1.
+No other source file differs from upstream 0.9.0.
+
+The manifests of pingora-prometheus and pingora-foundations differ only in
+naming the renamed workspace crate they depend on (`package =
+"zentinel-pingora-core"`); their source is unmodified and they are not
+republished.
 
 Republished crates
 ------------------
