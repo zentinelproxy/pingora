@@ -134,6 +134,16 @@ pub trait Session: Send + Sync + Unpin + 'static {
 
     fn enable_retry_buffering(&mut self);
 
+    /// Enable retry buffering with a buffer of up to `limit` bytes.
+    ///
+    /// The default ignores `limit` and calls [`Self::enable_retry_buffering`],
+    /// so existing implementations keep compiling and behaving as before.
+    /// Implementations that can size their buffer should override it.
+    fn enable_retry_buffering_with_limit(&mut self, limit: usize) {
+        let _ = limit;
+        self.enable_retry_buffering();
+    }
+
     fn retry_buffer_truncated(&self) -> bool;
 
     fn get_retry_buffer(&self) -> Option<Bytes>;

@@ -676,6 +676,22 @@ impl Session {
         }
     }
 
+    /// Like [`Self::enable_retry_buffering`], but buffer up to `limit` bytes
+    /// instead of the default 64 KiB.
+    ///
+    /// For callers that read the whole request body before the proxy phase
+    /// (to inspect or validate it) and need it replayed to the upstream: the
+    /// retry buffer is what carries it there, and a body larger than the buffer
+    /// is otherwise dropped. Has no effect if retry buffering is already enabled.
+    pub fn enable_retry_buffering_with_limit(&mut self, limit: usize) {
+        match self {
+            Self::H1(s) => s.enable_retry_buffering_with_limit(limit),
+            Self::H2(s) => s.enable_retry_buffering_with_limit(limit),
+            Self::Subrequest(s) => s.enable_retry_buffering_with_limit(limit),
+            Self::Custom(s) => s.enable_retry_buffering_with_limit(limit),
+        }
+    }
+
     pub fn get_retry_buffer(&self) -> Option<Bytes> {
         match self {
             Self::H1(s) => s.get_retry_buffer(),
