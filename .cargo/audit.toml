@@ -13,4 +13,12 @@ ignore = [
     # h2 0.3.27 is pulled in only by the optional worker-s3 dependency chain.
     # The feature is disabled by default, but users who enable it remain affected.
     "RUSTSEC-2026-0258", # h2: unbounded empty DATA frames
+    # rustls 0.21.12 reaches the graph only through the same optional chain
+    # (dial9-tokio-telemetry -> aws-config -> aws-smithy-http-client ->
+    # hyper-rustls 0.24), enabled by the dial9-cpu-profiling / worker-s3
+    # features, which are off by default and which Zentinel never enables.
+    # Both advisories concern rustls as a TLS client; 0.21 has no fix and no
+    # aws-smithy-http-client release compatible with Rust 1.85 drops it.
+    "RUSTSEC-2026-0346", # rustls: Debug impls for client session values expose secrets
+    "RUSTSEC-2026-0349", # rustls: unauthenticated ServerHello can downgrade key exchange
 ]
