@@ -2063,6 +2063,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retry_buffer_limit_can_be_raised_per_request() {
+        let body_len = 200 * 1024;
+        let mut request =
+            format!("PUT / HTTP/1.1\r\nHost: example.com\r\nContent-Length: {body_len}\r\n\r\n")
+                .into_bytes();
+        request.resize(request.len() + body_len, b'a');
+
+        // The default 64 KiB buffer drops a 200 KiB body...
+        let mut default = new_request_session(&request, Arc::new(Mutex::new(Vec::new()))).await;
+        default.enable_retry_buffering();
+        while default.read_request_body().await.unwrap().is_some() {}
+        assert!(default.retry_buffer_truncated());
+        assert!(default.get_retry_buffer().is_none());
+
+        // ...a buffer sized for it keeps all of it, byte for byte.
+        let mut sized = new_request_session(&request, Arc::new(Mutex::new(Vec::new()))).await;
+        sized.enable_retry_buffering_with_limit(256 * 1024);
+        while sized.read_request_body().await.unwrap().is_some() {}
+        assert!(!sized.retry_buffer_truncated());
+        let buffered = sized.get_retry_buffer().expect("whole body buffered");
+        assert_eq!(buffered.len(), body_len);
+        assert!(buffered.iter().all(|b| *b == b'a'));
+
+        // Enabling it again does not shrink or replace an existing buffer.
+        sized.enable_retry_buffering();
+        assert_eq!(sized.get_retry_buffer().unwrap().len(), body_len);
+    }
+
+    #[tokio::test]
     async fn default_retry_policy_requires_an_untruncated_body_buffer() {
         let mut complete = buffered_put_session(64 * 1024).await;
         assert!(!complete.retry_buffer_truncated());
