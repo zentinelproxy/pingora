@@ -28,6 +28,22 @@ modifications relative to upstream Pingora 0.9.0:
       the upstream's response headers whether a request should be retried.
       Upstream only retries on connection-level failures.
 
+  pingora-core/src/protocols/http/server.rs
+  pingora-core/src/protocols/http/v1/server.rs
+  pingora-core/src/protocols/http/v2/server.rs
+  pingora-core/src/protocols/http/subrequest/server.rs
+  pingora-core/src/protocols/http/custom/server.rs
+      Adds `Session::enable_retry_buffering_with_limit`, which sets the size
+      of the retry buffer per request. Upstream fixes it at 64 KiB, so a
+      request body the caller has read in full before proxying is dropped
+      from the buffer when larger, and never reaches the upstream. The
+      custom-session trait gets a default that falls back to the standard
+      buffer. (zentinel-pingora-core 0.9.1)
+
+  pingora-proxy/src/lib.rs
+      Adds a test for the per-request retry buffer limit; no functional
+      change.
+
 No other source file differs from upstream 0.9.0.
 
 The manifests of pingora-prometheus and pingora-foundations differ only in
