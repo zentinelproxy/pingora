@@ -10,7 +10,7 @@ Modifications
 -------------
 
 As required by section 4(b) of the Apache License, the following files carry
-modifications relative to upstream Pingora 0.9.0:
+modifications relative to upstream Pingora 0.9.1:
 
   pingora-core/src/listeners/tls/rustls/mod.rs
       Adds `TlsSettings::with_server_config`, which accepts a caller-built
@@ -44,14 +44,7 @@ modifications relative to upstream Pingora 0.9.0:
       Adds a test for the per-request retry buffer limit; no functional
       change.
 
-  pingora-core/src/protocols/l4/stream.rs
-  pingora-core/src/listeners/mod.rs
-      Backport of upstream commit 5b30d71 (after 0.9.0): the L4 buffers are
-      held in an enum instead of a zero-capacity `BufStream`, which tokio
-      1.54 rejects with a panic on every accept and connect. Adds a listener
-      test for unbuffered streams. (zentinel-pingora-core 0.9.2)
-
-No other source file differs from upstream 0.9.0.
+No other source file differs from upstream 0.9.1.
 
 The manifests of pingora-prometheus and pingora-foundations differ only in
 naming the renamed workspace crate they depend on (`package =
